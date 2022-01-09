@@ -16,8 +16,7 @@ class Game:
     EASY: str = 'easy'
     LIMITED: str = 'limited'
 
-    def __init__(self, canvas: Canvas, mode: str, word_length: int = 5):
-        self.canvas: Canvas = canvas
+    def __init__(self, mode: str, word_length: int = 5):
         self.target: Word = self.generate_target(word_length)
         self.mode = mode
         self.guesses: list = []
@@ -33,7 +32,7 @@ class Game:
 
         return target
 
-    def guess(self, word: str) -> tuple:
+    def guess(self, word: str, canvas: Canvas) -> tuple:
         lowered_word = word.lower()
         if not word or len(word) != len(self.target):
             return self.INVALID, f'Your guesses must be {len(self.target)} letters long.', None
@@ -44,15 +43,16 @@ class Game:
                 f'{word} is the correct answer! Congrats! ' \
                 f'It took you {len(self.guesses) + 1} {guess_word}.\n' \
                 f'*{word}*: {self.target.definition}', \
-                self.draw_word(lowered_word)
+                self.draw_word(lowered_word, canvas)
 
         if not Words.get_by_word(lowered_word):
             return self.INVALID, f'{word} is not a word, you {RandomText.idiot()}', None
 
-        drawn_word = self.draw_word(lowered_word)
+        drawn_word = self.draw_word(lowered_word, canvas)
         if lowered_word not in self.guesses:
             self.guesses.append(lowered_word)
-            self.progress = self.canvas.vertical_join(self.progress, drawn_word) if self.progress else drawn_word
+            self.progress = canvas.vertical_join(
+                self.progress, drawn_word) if self.progress else drawn_word
 
         if self.mode == self.LIMITED and len(self.guesses) > len(self.target):
             return self.FAILED, \
@@ -62,32 +62,34 @@ class Game:
 
         return self.INCORRECT, None, drawn_word
 
-    def get_unused_letters(self):
+    def get_unused_letters(self, canvas: Canvas):
         letters = list(string.ascii_lowercase)
         for word in self.guesses:
             for letter in word:
                 letters.remove(letter) if letter in letters else None
-        return self.canvas.draw_word([self.canvas.draw_char(letter.upper(), GlyphColor.COLD) for letter in letters])
+        return canvas.draw_word([canvas.draw_char(letter.upper(), GlyphColor.COLD) for letter in letters])
 
     def get_history(self) -> list:
         return self.guesses
 
-    def draw_word(self, word):
-        return self.canvas.draw_word([self.draw_letter(letter) for letter in self.check_word(word)])
+    def draw_word(self, word, canvas: Canvas):
+        return canvas.draw_word([self.draw_letter(letter, canvas) for letter in self.check_word(word)])
 
-    def draw_letter(self, letter) -> Glyph:
+    def draw_letter(self, letter, canvas: Canvas) -> Glyph:
         if letter['status'] == self.CORRECT:
-            return self.canvas.draw_char(letter['letter'].upper(), GlyphColor.HOT)
+            return canvas.draw_char(letter['letter'].upper(), GlyphColor.HOT)
 
         if letter['status'] == self.INCORRECT:
-            return self.canvas.draw_char(letter['letter'].upper(), GlyphColor.WARM)
+            return canvas.draw_char(letter['letter'].upper(), GlyphColor.WARM)
 
-        return self.canvas.draw_char(letter['letter'].upper(), GlyphColor.COLD)
+        return canvas.draw_char(letter['letter'].upper(), GlyphColor.COLD)
 
     def check_word(self, word):
-        target_map: list = [None if letter == word[i] else letter for i, letter in enumerate(self.target.word)]
+        target_map: list = [None if letter == word[i]
+                            else letter for i, letter in enumerate(self.target.word)]
         guess_map: list = [
-            {'letter': letter, 'status': None} if target_map[i] else {'letter': letter, 'status': self.CORRECT}
+            {'letter': letter, 'status': None} if target_map[i] else {
+                'letter': letter, 'status': self.CORRECT}
             for i, letter in enumerate(word)
         ]
 
