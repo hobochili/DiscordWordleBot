@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Tuple
 
 from Wordle.Canvas.Image import Image
 
@@ -31,6 +32,10 @@ class Glyph:
     @property
     def height(self) -> int:
         return self.image.height
+
+    @property
+    def size(self) -> Tuple[int, int]:
+        return self.image.size
 
     @property
     def border_width(self) -> int:

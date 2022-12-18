@@ -1,134 +1,113 @@
 import asyncio
-import hashlib
-import os
-import urllib.request
 import functools
+import hashlib
+import logging
 import random
 import signal
 import sys
-import logging
 
-from discord import Message
-from discord.ext import commands
+from Bot import (
+    Bot, RedisConnectionError, Lock,
+    LockNotOwnedError, LockError)
 
 from Config import Config
-from ErrorHandler.ErrorHandler import ErrorHandler
-from Helpers.RandomText import RandomText
-from Ping.Ping import Ping
-from Wordle.Lock import Lock, LockNotOwnedError
-from Wordle.Wordle import Wordle
-from Wordle.Words import Words
-from Wordle.RedisClient import RedisClient, RedisConnectionError
-from Wordle.Store import InMemoryLock, InMemoryStore, RedisStore, Store
 
 
-def shutdown(sig: signal, event: asyncio.Event, logger: logging.Logger):
-    logger.info(f'Received signal {sig.name}, exiting')
+def shutdown(sig: signal, event: asyncio.Event):
+    logging.getLogger('Main').info(f'Received signal {sig.name}, exiting')
     event.set()
 
 
-async def run(config: Config):
-    logger = logging.getLogger('WordleBot')
+async def wait_for_lock(
+        lock: Lock,
+        locked: asyncio.Event,
+        stopped: asyncio.Event):
 
-    bot = commands.Bot(command_prefix='%')
-    loop = bot.loop
+    while True:
+        if stopped.is_set():
+            return
 
-    stopped = asyncio.Event()
-    for sig in [signal.SIGINT, signal.SIGTERM]:
-        loop.add_signal_handler(
-            sig, functools.partial(shutdown, sig, stopped, logger))
-
-    state_backend: Store = InMemoryStore()
-
-    lock: Lock = InMemoryLock()
-    lock_timeout: float = 10.0
-
-    if config.redis.enable:
+        await asyncio.sleep(1)
         try:
-            redis = RedisClient(host=config.redis.host, port=config.redis.port)
-            await redis.ping()
+            if await lock.acquire():
+                locked.set()
+                return
+
         except RedisConnectionError as e:
-            logger.error(f'Unable to connect to Redis backend: {e}')
+            r = random.random()
+            if r <= 0.2:
+                logging.info(f'RedisConnectionError: {e}')
+
+            await asyncio.sleep(r * 5)
+
+
+async def extend_lock(
+        lock: Lock,
+        unlocked: asyncio.Event,
+        stopped: asyncio.Event,
+        new_ttl: float):
+
+    freq: int = 2
+    interval: float = new_ttl / freq
+
+    while True:
+        if stopped.is_set():
+            unlocked.set()
             return
 
-        logger.info(
-            f'Connected to Redis server at {config.redis.host}:{config.redis.port}')
+        r = 1.0
+        try:
+            await asyncio.wait_for(
+                lock.extend(
+                    additional_time=new_ttl, replace_ttl=True),
+                timeout=1.0)
 
-        state_backend = RedisStore(redis)
-        lock_key = hashlib.sha256(config.token.encode()).hexdigest()
-        lock = redis.lock(
-            f'wordlebot:lock:{lock_key}', timeout=lock_timeout, blocking_timeout=1)
+        except asyncio.TimeoutError:
+            continue
 
-    bot.add_cog(ErrorHandler(bot, logger=logger))
-    bot.add_cog(Wordle(bot, config=config,
-                state_backend=state_backend, logger=logger))
-    bot.add_cog(Ping(bot, logger=logger))
+        except RedisConnectionError as e:
+            r = random.random()
+            if r <= 0.2:
+                logging.warning(f'RedisConnectionError: {e}')
 
-    @bot.event
-    async def on_ready():
-        logger.info(f'Bot started with {state_backend.type_desc} state')
-
-    @bot.event
-    async def on_message(msg: Message):
-        if msg.channel.id in config.deny_channels:
+        except LockNotOwnedError as e:
+            logging.warning('Lock lost')
+            unlocked.set()
             return
 
-        if config.allow_channels and msg.channel.id not in config.allow_channels:
+        except Exception as e:
+            logging.warning(
+                f'Failed to extend lock. {e.__class__.__name__}: {e}')
+            unlocked.set()
             return
 
-        if bot.user.mentioned_in(msg):
-            return await msg.channel.send(RandomText.hal_9000(msg.author.mention))
+        await asyncio.sleep(interval * r)
 
-        await bot.process_commands(msg)
 
-    async def acquire_lock(locked: asyncio.Event, stopped: asyncio.Event):
-        while True:
-            if stopped.is_set():
-                return
+async def run(config: Config, stopped: asyncio.Event):
+    logger = logging.getLogger('main')
 
-            await asyncio.sleep(1)
-            try:
-                if await lock.acquire():
-                    locked.set()
-                    return
-            except RedisConnectionError as e:
-                r = random.random()
-                if r <= 0.2:
-                    logger.warning(f'RedisConnectionError: {e}')
-                await asyncio.sleep(r * 5)
+    bot = Bot(config)
 
-    async def extend_lock(
-            unlocked_event: asyncio.Event,
-            stop_event: asyncio.Event,
-            new_ttl: float):
+    await bot.setup()
+    await bot.mount()
 
-        freq: int = 2
-        interval: float = new_ttl / freq
+    if not config.redis.enable:
+        asyncio.create_task(
+            bot.client.start(bot.config.token),
+            name='bot')
 
-        while True:
-            if stop_event.is_set():
-                unlocked_event.set()
-                return
+        return await stopped.wait()
 
-            r = 1.0
+    # Run with lock
 
-            try:
-                await asyncio.wait_for(
-                    lock.extend(additional_time=new_ttl, replace_ttl=True),
-                    timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
-            except RedisConnectionError as e:
-                r = random.random()
-                if r <= 0.2:
-                    logger.warning(f'RedisConnectionError: {e}')
-            except Exception as e:
-                logger.warning(
-                    f'Failed to extend lock. {e.__class__.__name__}: {e}')
-                unlocked_event.set()
-                return
+    lock_timeout = 10.0
 
-            await asyncio.sleep(interval * r)
+    lock_key = hashlib.sha256(bot.config.token.encode()).hexdigest()
+    lock = bot.state_backend.client.lock(
+        f'wordlebot:lock:{lock_key}',
+        timeout=lock_timeout,
+        blocking_timeout=1)
 
     locked = asyncio.Event()
     unlocked = asyncio.Event()
@@ -136,39 +115,53 @@ async def run(config: Config):
     logger.info('Attempting to acquire lock...')
 
     while not stopped.is_set():
-        await acquire_lock(locked, stopped)
+        await wait_for_lock(
+            lock=lock,
+            locked=locked,
+            stopped=stopped)
+
         unlocked.clear()
 
-        if locked.is_set() and not stopped.is_set():
-            logger.info('Lock acquired')
+        if not locked.is_set or stopped.is_set():
+            continue
 
-            tasks = [
-                loop.create_task(
-                    extend_lock(
-                        unlocked_event=unlocked,
-                        stop_event=stopped,
-                        new_ttl=lock_timeout),
-                    name='extend_lock'),
-                loop.create_task(
-                    bot.start(config.token),
-                    name='bot')]
+        logger.info('Lock acquired')
 
-            await unlocked.wait()
+        tasks = [
+            asyncio.create_task(
+                extend_lock(
+                    lock=lock,
+                    unlocked=unlocked,
+                    stopped=stopped,
+                    new_ttl=lock_timeout),
+                name='extend_lock'),
+            asyncio.create_task(
+                bot.client.start(bot.config.token),
+                name='bot')
+        ]
 
-            for task in tasks:
-                logging.info(f'Cancelling task: {task.get_name()}')
-                task.cancel()
+        await unlocked.wait()
+
+        for task in tasks:
+            logging.info(f'Canceling task: {task.get_name()}')
+            task.cancel()
 
     await stopped.wait()
+
     try:
         await lock.release()
-    except LockNotOwnedError:
-        ...
+
+    except LockNotOwnedError as e:
+        logging.debug(e)
+
+    except LockError as e:
+        logging.debug(e)
+
+    except Exception as e:
+        logging.error(e.__class__, e)
 
 
 def main():
-    # TODO: Extract all this setup to a separate function or class
-
     logging.basicConfig(
         stream=sys.stdout,
         format='%(asctime)s %(levelname)-.4s [%(name)-16s] %(message)s',
@@ -180,30 +173,16 @@ def main():
         logging.error(e)
         exit(1)
 
-    logger = logging.getLogger('WordleBot')
-    if config.verbose:
-        logger = logging.getLogger()
+    logging.getLogger('Main').setLevel(config.log_level)
 
-    logger.setLevel(config.log_level)
-    logger.info('{message} at log level: {level}'.format(
-        message='Verbose logging' if config.verbose else 'Logging',
-        level=logging.getLevelName(logger.getEffectiveLevel())
-    ))
+    loop = asyncio.new_event_loop()
+    stopped = asyncio.Event()
 
-    if not os.path.exists(Words.DATABASE):
-        logger.info('Performing first time setup.')
-        logger.info('Creating database...')
-        Words.create_db()
-        logger.info('Downloading wordlist...')
-        urllib.request.urlretrieve(config.wordlist, Words.WORDLIST)
-        logger.info('Seeding database...')
-        Words.seed()
-        logger.info('Setup complete.')
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        loop.add_signal_handler(
+            sig, functools.partial(shutdown, sig, stopped))
 
-    try:
-        asyncio.run(run(config))
-    except Exception as e:
-        logger.error(e)
+    loop.run_until_complete(run(config, stopped))
 
 
 if __name__ == '__main__':

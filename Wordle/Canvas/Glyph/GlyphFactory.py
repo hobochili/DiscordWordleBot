@@ -16,7 +16,7 @@ from .GlyphTemplate import GlyphTemplate
 class GlyphFactory:
     def __init__(self, config: GlyphConfig):
         self._alphabet: str = ' ' + string.digits + \
-            string.ascii_letters + string.punctuation
+            string.ascii_letters + string.punctuation + '💩' + '😄'
         self._error_char = '?'
         self._error_color = GlyphColor.RED
 
@@ -56,22 +56,21 @@ class GlyphFactory:
         font_color = color.value[2]
 
         # Create the main glyph tile
-        tile = PILImage.new('RGBA', tpl.size, color=color.value[0])
-        ImageDraw.Draw(tile, 'RGBA').rectangle(
-            tpl.coords,
-            fill=fill_color,
+        tile = PILImage.new('RGBA', tpl.size)
+        draw = ImageDraw.Draw(tile, 'RGBA')
+        draw.rectangle(tpl.coords, fill=fill_color)
+
+        draw.text(
+            tpl.char_coords,
+            text=char,
+            font=tpl.font,
+            fill=font_color)
+
+        draw.rectangle(
+            xy=(0, 0, tile.width-1, tile.height-1),
+            fill=None,
             outline=border_color,
             width=tpl.border_width)
-
-        # Create a character tile, cropped to the bounding box
-        char_tile = PILImage.new('RGBA', tpl.font.getsize(
-            char), color=fill_color)
-        ImageDraw.Draw(char_tile, 'RGBA').text(
-            (0, 0), text=char, font=tpl.font, fill=font_color)
-        char_tile = char_tile.crop(tpl.font.getbbox(char))
-
-        tile.paste(char_tile, (math.floor((tile.width - char_tile.width) / 2),
-                               tpl.vertical_offset))
 
         return Glyph(name=char, image=tile, font=tpl.font,
                      shape=shape, color=color)

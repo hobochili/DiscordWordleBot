@@ -2,9 +2,10 @@ import pickle
 
 from contextlib import asynccontextmanager
 
+from Bot.Lock import Lock
+from Bot.RedisClient import RedisClient
+
 from Wordle.Game import Game
-from Wordle.Lock import Lock
-from Wordle.RedisClient import RedisClient
 from Wordle.Store import (
     StoreType, GameNotFoundError,
     GameNotAddedError, GameNotUpdatedError)

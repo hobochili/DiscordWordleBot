@@ -22,7 +22,7 @@ class Words:
                 cur.execute('''
                     CREATE TABLE words (
                         word CHAR(25) NOT NULL,
-                        definition VARCHAR(255) NOT NULL  
+                        definition VARCHAR(255) NOT NULL
                     );
                 ''')
             con.commit()
@@ -35,7 +35,8 @@ class Words:
                 for line in wordlist:
                     try:
                         word, definition = line.split('	')
-                        cur.execute('INSERT INTO words VALUES(?,?)', (word.lower(), definition))
+                        cur.execute('INSERT INTO words VALUES(?,?)',
+                                    (word.lower(), definition))
                     except ValueError:
                         continue
         con.commit()

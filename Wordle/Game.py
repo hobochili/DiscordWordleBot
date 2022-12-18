@@ -2,10 +2,10 @@ import string
 from typing import Dict, Optional
 
 from Helpers.RandomText import RandomText
-from Wordle.Word import Word
-from Wordle.Words import Words
-from Wordle.Canvas import Canvas, Image
-from Wordle.Canvas.Glyph import GlyphColor, GlyphShape
+from .Word import Word
+from .Words import Words
+from .Canvas import Canvas, Image
+from .Canvas.Glyph import GlyphColor, GlyphShape
 
 
 class Game:
@@ -51,19 +51,20 @@ class Game:
     def suggest(self):
         return Words.get_random(len(self.target))[0].word
 
-    def guess(self, word: str, author_id: int) -> tuple:
+    def guess(self, word: str, guild_id: int, author_id: int) -> tuple:
         if not word or len(word) != len(self.target):
-            return self.INVALID, f'Your guesses must be {len(self.target)} letters long.', None
+            return self.INVALID, f'Your guesses must be {len(self.target)} letters long.', None, None
 
         lowered_word = word.lower()
 
         if any(letter for letter in lowered_word if letter not in string.ascii_lowercase):
-            return self.INVALID, f'{word} contains illegal characters, you {RandomText.idiot(author_id)}', None
+            return self.INVALID, f'{word} contains illegal characters, you {RandomText.idiot(guild_id, author_id)}', None, None
 
         if lowered_word != self.target.word and self.mode != self.PUZZLE and not Words.get_by_word(lowered_word):
-            return self.INVALID, f'{word} is not a word, you {RandomText.idiot(author_id)}', None
+            return self.INVALID, f'{word} is not a word, you {RandomText.idiot(guild_id, author_id)}', None, None
 
         image = self.draw_word(lowered_word)
+        animated_image = self.animate_word(lowered_word)
 
         if lowered_word not in self.guesses:
             self.guesses.append(lowered_word)
@@ -76,28 +77,32 @@ class Game:
                     f'{RandomText.success()} \n' \
                     f'The word was {word}.\n' \
                     f'*{word}*: {self.target.definition}', \
-                    self.progress
+                    self.progress, \
+                    animated_image
 
             return self.CORRECT, \
                 f'{RandomText.success()} {word.capitalize()} is the correct answer!' \
                 f'It took you {len(self.guesses)} {self.get_guess_word(len(self.guesses))}.\n' \
                 f'*{word}*: {self.target.definition}', \
-                self.progress
+                self.progress, \
+                animated_image
 
         if self.mode in [self.LIMITED, self.PUZZLE] and len(self.guesses) >= self.limit:
             return self.FAILED, \
                 f'{RandomText.failure()}\n' \
                 f'The correct answer is {self.target.word}. ' \
                 f'*{self.target.word}*: {self.target.definition}', \
-                image
+                None, \
+                animated_image
 
         if self.mode in [self.LIMITED, self.INCORRECT]:
             remaining: int = self.limit - len(self.guesses)
             return self.INCORRECT, \
                 f'Incorrect. You have {remaining} {self.get_guess_word(remaining)} left.', \
-                image
+                None, \
+                animated_image
 
-        return self.INCORRECT, None, image
+        return self.INCORRECT, None, image, animated_image
 
     def draw_unused_letters(self):
         rows = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm']
@@ -123,6 +128,14 @@ class Game:
                 for letter in guess_map]
 
         return self.canvas.draw_word(word)
+
+    def animate_word(self, word: str):
+        guess_map = self.check_word(word)
+
+        word = [(letter['letter'].upper(), self.status_color(letter['status']))
+                for letter in guess_map]
+
+        return self.canvas.animate_word(word)
 
     def check_word(self, word):
         target_map: list = [None if letter == word[i]

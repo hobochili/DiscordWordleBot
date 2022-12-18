@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from Wordle.Game import Game
-from Wordle.Lock import LockNotFoundError
+from Bot.Lock import LockNotFoundError
 from Wordle.Store.InMemory import InMemoryLock
 from Wordle.Store.Store import (
     GameNotAddedError, StoreType, GameNotFoundError, GameNotUpdatedError)

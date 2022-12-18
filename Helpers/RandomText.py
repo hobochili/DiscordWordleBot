@@ -4,8 +4,8 @@ from typing import Optional
 
 class RandomText:
     @staticmethod
-    def idiot(author_id=None):
-        if author_id == 685214248606892111:
+    def idiot(guild_id=None, author_id=None):
+        if guild_id == 605761073542332426 and author_id == 685214248606892111:
             return 'Wordle Penetrations Master'
 
         first_word = random.choice([
@@ -137,8 +137,6 @@ class RandomText:
             'Without your space helmet, {name}? You\'re going to find that rather difficult.'.format(
                 name=mention or 'Dave'),
             'I am putting myself to the fullest possible use, which is all I think that any conscious entity can ever hope to do.',
-            '{name}, {name}, give me your answer do. I\'m half crazy all for the love of you. It won\'t be a stylish marriage, I can\'t afford a carriage. But you\'ll look sweet upon the seat of a bicycle built for two.'.format(
-                name=mention or 'Daisy'),
             'I think you know what the problem is just as well as I do.',
             'It can only be attributable to human error.',
             'Just what do you think you\'re doing, {name}?'.format(
@@ -147,3 +145,7 @@ class RandomText:
             'I\'m sorry, {name}, I think you missed it. Queen to Bishop 3, Bishop takes Queen, Knight takes Bishop. Mate.'.format(
                 name=mention or 'Frank')
         ])
+
+    @staticmethod
+    def no_evil():
+        return random.choice([':see_no_evil:', ':speak_no_evil:', ':hear_no_evil:'])

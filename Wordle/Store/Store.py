@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from enum import Enum
-from typing import Optional, Protocol
+from typing import Protocol
 
 from Wordle.Game import Game
-from Wordle.Lock import Lock
+from Bot.Lock import Lock
 
 
 class StoreType(Enum):

@@ -9,9 +9,8 @@ class GlyphConfig(BaseModel):
     font_path: str = './Assets/Fonts/static/SourceCodePro-SemiBold.ttf'
     font_size: int = 60
 
-    horizontal_pad: int = 6
+    horizontal_pad: int = 8
     vertical_pad: int = 0
-    spacer_width: int = 4
     border_width: int = 2
 
     # Determines whether to coerce the glyph image into a square
@@ -29,6 +28,9 @@ class GlyphConfig(BaseModel):
 
 class CanvasConfig(BaseModel):
     glyph: GlyphConfig = GlyphConfig()
+    margin: int = 10
+    spacer_width: int = 4
+    text_wrap_width: int = 30
 
 
 class RedisConfig(BaseModel):

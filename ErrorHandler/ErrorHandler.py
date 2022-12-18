@@ -2,7 +2,7 @@ import logging
 
 from discord.ext import commands
 
-from Wordle.RedisClient import RedisConnectionError
+from Bot.RedisClient import RedisConnectionError
 
 
 class ErrorHandler(commands.Cog):

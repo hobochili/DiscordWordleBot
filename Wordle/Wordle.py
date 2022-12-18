@@ -1,5 +1,7 @@
+import asyncio
 import logging
 from typing import Optional
+import functools
 
 from discord.ext import commands
 from discord.ext.commands import Context, Bot, CommandError
@@ -7,21 +9,28 @@ from discord.ext.commands import Context, Bot, CommandError
 from Helpers.RandomText import RandomText
 
 from Config import Config
+from Bot.Lock import LockNotFoundError
+from Bot.RedisClient import RedisConnectionError
 
+from .Canvas import Canvas
+from .Echo import Echo
 from .Game import Game
 from .GameManager import GameManager
-from .Lock import LockNotFoundError
-from .RedisClient import RedisConnectionError
 from .Store import GameNotFoundError, Store
 from .Words import Words
+
+# TODO: fit this in config
+DURATION = 500
 
 
 class Wordle(commands.Cog):
     def __init__(self, bot: Bot, config: Config, state_backend: Store, logger: logging.Logger):
         self.bot = bot
+        self.canvas = Canvas(config.canvas)
         self.games: GameManager = GameManager(
-            canvas_config=config.canvas,
+            canvas=self.canvas,
             backend=state_backend)
+        self.echoer: Echo = Echo(canvas=self.canvas)
         self.logger: logging.Logger = logger.getChild(self.__class__.__name__)
 
     async def cog_command_error(self, ctx: Context, error: CommandError):
@@ -41,6 +50,8 @@ class Wordle(commands.Cog):
 
     @commands.command(aliases=['s'])
     async def start(self, ctx: Context, word_length: Optional[int] = 5, mode: Optional[str] = Game.EASY):
+        thread_mode = False
+
         try:
             if await self.games.get_current_game(ctx.message.channel):
                 return await ctx.send(
@@ -72,14 +83,20 @@ class Wordle(commands.Cog):
                 f'Game started. I\'m think of a word that is {word_length} letters long. '
                 f'You get {game.limit} guesses. Go!'
             )
+        elif thread_mode:
+            # TODO: Check if thread exists
+            thread = await ctx.message.create_thread(name=f'{game.mode}: {word_length}')
+            await thread.send(
+                f'Game started. I\'m think of a word that is {word_length} letters long. Can you guess it?',
+            )
         else:
             await ctx.send(
-                f'Game started. I\'m think of a word that is {word_length} letters long. Can you guess it?'
+                f'Game started. I\'m think of a word that is {word_length} letters long. Can you guess it?',
             )
 
         return
 
-    @commands.command()
+    @ commands.command()
     async def stop(self, ctx: Context):
         game = await self.games.get_current_game(ctx.message.channel)
 
@@ -91,26 +108,41 @@ class Wordle(commands.Cog):
         )
         return
 
-    @commands.command(aliases=['g'])
+    @ commands.command(aliases=['g'])
     async def guess(self, ctx: Context, word: Optional[str] = None):
         async with self.games.lock(ctx.message.channel):
             game = await self.games.get_current_game(ctx.message.channel)
 
-            status, message, image = game.guess(word, author_id=ctx.author.id)
+            status, message, image, animated_image = game.guess(
+                word, guild_id=ctx.guild.id, author_id=ctx.author.id)
+
             await self.games.update_game(ctx.message.channel, game)
 
             if status in [Game.CORRECT, Game.FAILED]:
                 await self.games.stop_current_game(ctx.message.channel)
 
+            if animated_image:
+                msg = await ctx.send(file=animated_image.to_discord_file())
+
+                async def _schedule_edit(delay: int):
+                    await asyncio.sleep(delay)
+                    await msg.edit(attachments=[image.to_discord_file()])
+
+                sleep_time = int(DURATION * len(game.target) / 500)
+                # Schedule static image edit in least 30s
+                # sleep_time = max([sleep_time, 30])
+                asyncio.get_running_loop().create_task(_schedule_edit(sleep_time))
+
             if status == Game.FAILED:
                 await ctx.send(file=image.to_discord_file())
 
-            if status in [Game.INCORRECT, Game.CORRECT] and image:
+            if status in [Game.INCORRECT, Game.CORRECT] and image and not animated_image:
                 return await ctx.send(message, file=image.to_discord_file())
 
-            return await ctx.send(message)
+            if message:
+                return await ctx.send(message)
 
-    @commands.command(aliases=['d'])
+    @ commands.command(aliases=['d'])
     async def define(self, ctx: Context, word: str):
         words = Words.get_by_word(word)
 
@@ -123,7 +155,7 @@ class Wordle(commands.Cog):
 
         return
 
-    @commands.command(aliases=['p'])
+    @ commands.command(aliases=['p'])
     async def progress(self, ctx: Context):
         async with self.games.lock(ctx.message.channel):
             game = await self.games.get_current_game(ctx.message.channel)
@@ -135,7 +167,7 @@ class Wordle(commands.Cog):
 
             return await ctx.send('Guesses so far:', file=game.progress.to_discord_file())
 
-    @commands.command(aliases=['h'])
+    @ commands.command(aliases=['h'])
     async def hint(self, ctx: Context):
         async with self.games.lock(ctx.message.channel):
             game = await self.games.get_current_game(ctx.message.channel)
@@ -144,13 +176,13 @@ class Wordle(commands.Cog):
                 file=game.draw_unused_letters().to_discord_file()
             )
 
-    @commands.command(aliases=['hh'])
+    @ commands.command(aliases=['hh'])
     async def known_letters(self, ctx: Context):
         async with self.games.lock(ctx.message.channel):
             game = await self.games.get_current_game(ctx.message.channel)
             return await ctx.send('Here\'s what you know:', file=game.draw_known_letters().to_discord_file())
 
-    @commands.command()
+    @ commands.command()
     async def suggest(self, ctx: Context):
         game = await self.games.get_current_game(ctx.message.channel)
 
@@ -162,3 +194,32 @@ class Wordle(commands.Cog):
         return await ctx.send(
             f'Try this one: {game.suggest()}'
         )
+
+    # TODO: enable in DMs
+    @ commands.command(aliases=['e'])
+    async def echo(self, ctx: Context):
+        async with ctx.channel.typing():
+            content, files, reference = await self.echoer.echo(ctx=ctx)
+            return await ctx.send(
+                content=content,
+                files=files,
+                reference=reference,
+                mention_author=False)
+
+    # TODO: enable in DMs
+    @ commands.command(aliases=['a'])
+    async def animate(self, ctx: Context, word: str):
+        async with ctx.channel.typing():
+            image = self.canvas.animate_word(word)
+            await ctx.send(
+                file=image.to_discord_file(),
+                reference=ctx.message.reference,
+                mention_author=False)
+
+
+def run_in_async_loop(f):
+    @ functools.wraps(f)
+    async def wrapped(*args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return (await loop.run_in_executor(None, f(*args, **kwargs)))
+    return wrapped

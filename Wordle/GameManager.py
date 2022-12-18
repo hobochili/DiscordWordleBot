@@ -2,18 +2,17 @@ from contextlib import asynccontextmanager
 
 from discord import TextChannel, DMChannel
 
-from Config import CanvasConfig
+from Bot.Lock import Lock
 
-from Wordle.Canvas import Canvas
-from Wordle.Game import Game
-from Wordle.Lock import Lock
-from Wordle.Store import Store
+from .Canvas import Canvas
+from .Game import Game
+from .Store import Store
 
 
 class GameManager:
-    def __init__(self, canvas_config: CanvasConfig, backend: Store):
+    def __init__(self, canvas: Canvas, backend: Store):
         self.store: Store = backend
-        self.canvas: Canvas = Canvas(canvas_config)
+        self.canvas: Canvas = canvas
 
     @staticmethod
     def server_id(channel: TextChannel) -> int:
