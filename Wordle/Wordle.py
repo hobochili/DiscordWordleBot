@@ -113,8 +113,10 @@ class Wordle(commands.Cog):
         async with self.games.lock(ctx.message.channel):
             game = await self.games.get_current_game(ctx.message.channel)
 
+            guild_id = None if not ctx.guild else ctx.guild.id
+
             status, message, image, animated_image = game.guess(
-                word, guild_id=ctx.guild.id, author_id=ctx.author.id)
+                word, guild_id=guild_id, author_id=ctx.author.id)
 
             await self.games.update_game(ctx.message.channel, game)
 
