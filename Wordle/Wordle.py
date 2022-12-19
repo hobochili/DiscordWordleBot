@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 import functools
 
+from discord import Message
 from discord.ext import commands
 from discord.ext.commands import Context, Bot, CommandError
 
@@ -12,7 +13,7 @@ from Config import Config
 from Bot.Lock import LockNotFoundError
 from Bot.RedisClient import RedisConnectionError
 
-from .Canvas import Canvas
+from .Canvas import Canvas, Image
 from .Echo import Echo
 from .Game import Game
 from .GameManager import GameManager
@@ -123,26 +124,37 @@ class Wordle(commands.Cog):
             if status in [Game.CORRECT, Game.FAILED]:
                 await self.games.stop_current_game(ctx.message.channel)
 
-            if animated_image:
-                msg = await ctx.send(file=animated_image.to_discord_file())
-
-                async def _schedule_edit(delay: int):
-                    await asyncio.sleep(delay)
-                    await msg.edit(attachments=[image.to_discord_file()])
+            async def _schedule_edit(
+                    msg: Message,
+                    new_content: Optional[str] = None,
+                    new_image: Optional[Image] = None):
 
                 sleep_time = int(DURATION * len(game.target) / 500)
-                # Schedule static image edit in least 30s
-                # sleep_time = max([sleep_time, 30])
-                asyncio.get_running_loop().create_task(_schedule_edit(sleep_time))
+                await asyncio.sleep(sleep_time)
+
+                if not new_content and not new_image:
+                    return
+
+                kwargs = {}
+                if new_content is not None:
+                    kwargs['content'] = new_content
+                if new_image is not None:
+                    kwargs['attachments'] = [new_image.to_discord_file()]
+
+                await msg.edit(**kwargs)
+
+            if animated_image:
+                msg = await ctx.send(file=animated_image.to_discord_file())
+                return asyncio.get_running_loop().create_task(
+                    _schedule_edit(msg, new_content=message, new_image=image))
 
             if status == Game.FAILED:
                 await ctx.send(file=image.to_discord_file())
 
-            if status in [Game.INCORRECT, Game.CORRECT] and image and not animated_image:
+            if status in [Game.INCORRECT, Game.CORRECT] and image:
                 return await ctx.send(message, file=image.to_discord_file())
 
-            if message:
-                return await ctx.send(message)
+            return await ctx.send(message)
 
     @ commands.command(aliases=['d'])
     async def define(self, ctx: Context, word: str):

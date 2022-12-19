@@ -92,14 +92,14 @@ class Game:
                 f'{RandomText.failure()}\n' \
                 f'The correct answer is {self.target.word}. ' \
                 f'*{self.target.word}*: {self.target.definition}', \
-                None, \
+                image, \
                 animated_image
 
         if self.mode in [self.LIMITED, self.INCORRECT]:
             remaining: int = self.limit - len(self.guesses)
             return self.INCORRECT, \
                 f'Incorrect. You have {remaining} {self.get_guess_word(remaining)} left.', \
-                None, \
+                image, \
                 animated_image
 
         return self.INCORRECT, None, image, animated_image
